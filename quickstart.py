@@ -1,4 +1,5 @@
 import csv
+import json
 import os.path
 import xml.etree.ElementTree as ET
 
@@ -8,218 +9,204 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-# If modifying these scopes, delete the file token.json.
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
-# The ID and range of a sample spreadsheet.
-SAMPLE_SPREADSHEET_ID = "1Aksow5R7eRIe-NP1XGzRAmZzdwz_IfcwiWhPeMekE20"
-SAMPLE_RANGE_NAME = "Hoja1!A2:E"
+class MissionTestUpdater:
+    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
 
-CSV_PATH = "C:\LANR\MisionMeteorica\encuesta_data.txt"
-XML_SENSOR = "C:\\LANR\\MisionMeteorica\\Nueva Carpeta\\Con sensor"
-XML_SIN_SENSOR = "C:\\LANR\\MisionMeteorica\\Nueva Carpeta\\Sin sensor"
-
-HOJA_TODOS = "Todos"
-HOJA_CON_SENSOR = "Con Sensor"
-HOJA_SIN_SENSOR = "Sin Sensor"
-HOJA_TERAPEUTAS = "Terapeutas"
-HOJA_ICS = "ICS"
-RANGO = "A1:AK20"
-
-
-def get_ics(dir_path):
-    ics = []
-    for i in range(1, len(os.listdir(dir_path)) + 1):
-        ics.append(get_last_ic(os.path.join(dir_path, f"1_Data{i:02d}.xml")))
-    return ics
-
-
-def get_last_ic(file_path):
-    tree = ET.parse(file_path)
-    root = tree.getroot()
-
-    ultimas_partidas = root.find("HistorialPartidas")[:10]
-
-    ics = [float(p.find("dificultad").text) for p in ultimas_partidas]
-    ics.reverse()
-
-    return ics
-
-
-def get_credentials():
-    creds = None
-    # The file token.json stores the user's access and refresh tokens, and is
-    # created automatically when the authorization flow completes for the first
-    # time.
-    if os.path.exists("token.json"):
-        creds = Credentials.from_authorized_user_file("token.json", SCOPES)
-    # If there are no (valid) credentials available, let the user log in.
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                "credentials.json", SCOPES
-            )
-            creds = flow.run_local_server(port=0)
-        # Save the credentials for the next run
-        with open("token.json", "w") as token:
-            token.write(creds.to_json())
-
-    return creds
-
-
-def append_to_spreadsheets(credentials, spreadsheet_id, table_range, body):
-    """
-    Agrega nuevos datos al final de la tabla que esta contenida en el table_range
-    :param credentials: Credenciales de API
-    :param spreadsheet_id: ID de la hoja de calculo (en URL)
-    :param table_range: Rango donde se encuentra la tabla al final de la cual se insertaran nuevos datos
-    :param body: Lista de listas con los datos que se van a agregar
-    """
-    try:
-        service = build("sheets", "v4", credentials=credentials)
-
-        # Call the Sheets API
-        sheet = service.spreadsheets()
-        result = (
-            sheet.values()
-            .append(
-              spreadsheetId=spreadsheet_id,
-              range=table_range,
-              valueInputOption="USER_ENTERED",
-              body=body
-            )
-            .execute()
-        )
-
-        print(f"Rango de celdas actualizadas: {result.get('tableRange')}")
-    except HttpError as err:
-        print(err)
-
-
-def update_to_spreadsheets(credentials, spreadsheet_id, update_range, body):
-    """
-    Agrega nuevos datos en la hoja de calculo en el rango indicado
-    :param credentials: Credenciales de API
-    :param spreadsheet_id: ID de hoja de calculo (en URL)
-    :param update_range: Rango donde se insertaran los datos. Ejemplo: Hoja1!A1:J3
-    :param body: Lista de listas con los datos que se insertaran
-    """
-    try:
-        service = build("sheets", "v4", credentials=credentials)
-
-        # Call the Sheets API
-        sheet = service.spreadsheets()
-        result = (
-            sheet.values()
-            .batchUpdate(
-                spreadsheetId=spreadsheet_id,
-                # range=update_range,
-                # valueInputOption="USER_ENTERED",
-                body=body
-            )
-            .execute()
-        )
-
-        print(f"Numero de celdas actualizadas: {result.get('totalUpdatedCells')}")
-    except HttpError as err:
-        print(err)
-
-
-def get_number_of_rows(credentials, spreadsheet_id, hoja=HOJA_TODOS, rango=RANGO):
-    try:
-        service = build("sheets", "v4", credentials=credentials)
-
-        # Call the Sheets API
-        sheet = service.spreadsheets()
-        result = (
-            sheet.values()
-            .get(
-                spreadsheetId=spreadsheet_id,
-                range=f"{hoja}!{rango}"
-            )
-            .execute()
-        )
-
-        print(f"Numero de filas en tabla: {len(result.get('values', []))}")
-        return len(result.get("values", []))
-    except HttpError as err:
-        print(err)
-
-
-def get_csv_data(path):
-    with open(path, "r", encoding="utf-8") as csv_file:
-        reader = csv.reader(csv_file, delimiter=",")
-        return [[x for x in row] for row in reader]
-
-
-def separate_sensor_users(values):
-    con_sensor = [row for row in values if "-1" not in row[17]]
-    sin_sensor = [row for row in values if "-1" in row[17]]
-    return con_sensor, sin_sensor
-
-
-def get_terapeutas_row(values):
-    return [row for row in values if "-1" not in row[30]]
-
-
-def main():
-    creds = get_credentials()
-    values = get_csv_data(CSV_PATH)
-    r = get_number_of_rows(creds, SAMPLE_SPREADSHEET_ID)
-    values = values[r:]
-
-    # Datos de IC
+    hoja_todos = "Todos"
+    hoja_con_sensor = "Con Sensor"
+    hoja_sin_sensor = "Sin Sensor"
+    hoja_terapeutas = "Terapeutas"
+    hoja_ics = "ICS"
+    rango_hojas_encuesta = "A1:AK20"
     rango_ics_con_sensor = "A1:K15"
     rango_ics_sin_sensor = "L1:Z15"
 
-    num_ics_con_sensor = get_number_of_rows(creds, SAMPLE_SPREADSHEET_ID, HOJA_ICS, rango_ics_con_sensor)
-    num_ics_sin_sensor = get_number_of_rows(creds, SAMPLE_SPREADSHEET_ID, HOJA_ICS, rango_ics_sin_sensor)
-    ics_con_sensor = get_ics(XML_SENSOR)[num_ics_con_sensor:]
-    ics_sin_sensor = get_ics(XML_SIN_SENSOR)[num_ics_sin_sensor:]
+    def __init__(self,
+                 spreadsheet_id,
+                 cvs_path,
+                 xml_con_sensor_path,
+                 xml_sin_sensor_path):
+        self.spreadsheet_id = spreadsheet_id
+        self.cvs_path = cvs_path
+        self.xml_con_sensor_path = xml_con_sensor_path
+        self.xml_sin_sensor_path = xml_sin_sensor_path
 
-    if ics_con_sensor:
-        body = {"values": ics_con_sensor}
-        append_to_spreadsheets(creds, SAMPLE_SPREADSHEET_ID, f"{HOJA_ICS}!{rango_ics_con_sensor}", body)
+        self.creds = None
+        self.cvs_data = []
+        self.con_sensor_data = []
+        self.sin_sensor_data = []
+        self.terapeutas_data = []
 
-    if ics_sin_sensor:
-        body = {"values": ics_sin_sensor}
-        append_to_spreadsheets(creds, SAMPLE_SPREADSHEET_ID, f"{HOJA_ICS}!{rango_ics_sin_sensor}", body)
+        self._get_credentials()
+        self._get_csv_data()
+        self.num_data_in_spreadsheet = self.get_number_of_rows()
+        self.data_to_update = self.cvs_data[self.num_data_in_spreadsheet:]
+        self._separate_sensor_users()
+        self._get_terapeutas_row()
 
-    if not values:
-        print("No hay valores por actualizar")
-        return
-    
-    con_sensor_values, sin_sensor_values = separate_sensor_users(values)
-    terapeutas = get_terapeutas_row(values)
+        num_ics_con_sensor = self.get_number_of_rows(self.hoja_ics, self.rango_ics_con_sensor)
+        num_ics_sin_sensor = self.get_number_of_rows(self.hoja_ics, self.rango_ics_sin_sensor)
+        self.ics_con_sensor = self._get_ics(self.xml_con_sensor_path)[num_ics_con_sensor:]
+        self.ics_sin_sensor = self._get_ics(self.xml_sin_sensor_path)[num_ics_sin_sensor:]
 
-    body_todos = {"values": values}
-    body_con_sensor = {"values": con_sensor_values}
-    body_sin_sensor = {"values": sin_sensor_values}
-    body_terapeutas = {"values": terapeutas}
+    def _get_credentials(self):
+        self.creds = None
+        # The file token.json stores the user's access and refresh tokens, and is
+        # created automatically when the authorization flow completes for the first
+        # time.
+        if os.path.exists("token.json"):
+            self.creds = Credentials.from_authorized_user_file("token.json", self.scopes)
+        # If there are no (valid) credentials available, let the user log in.
+        if not self.creds or not self.creds.valid:
+            if self.creds and self.creds.expired and self.creds.refresh_token:
+                self.creds.refresh(Request())
+            else:
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    "credentials.json", self.scopes
+                )
+                self.creds = flow.run_local_server(port=0)
+            # Save the credentials for the next run
+            with open("token.json", "w") as token:
+                token.write(self.creds.to_json())
 
-    append_to_spreadsheets(creds, SAMPLE_SPREADSHEET_ID, f"{HOJA_TODOS}!{RANGO}", body_todos)
-    append_to_spreadsheets(creds, SAMPLE_SPREADSHEET_ID, f"{HOJA_CON_SENSOR}!{RANGO}", body_con_sensor)
-    append_to_spreadsheets(creds, SAMPLE_SPREADSHEET_ID, f"{HOJA_SIN_SENSOR}!{RANGO}", body_sin_sensor)
-    append_to_spreadsheets(creds, SAMPLE_SPREADSHEET_ID, f"{HOJA_TERAPEUTAS}!{RANGO}", body_terapeutas)
+    def _get_ics(self, dir_path):
+        ics = []
+        for i in range(1, len(os.listdir(dir_path)) + 1):
+            ics.append(self._get_last_ic(os.path.join(dir_path, f"1_Data{i:02d}.xml")))
+        return ics
 
-    # Datos de IC
-    rango_ics_con_sensor = "A1:K20"
-    rango_ics_sin_sensor = "L1:Z20"
+    def _get_last_ic(self, file_path, num_rondas=10):
+        """Obtiene los ics de las ultimas rondas"""
+        tree = ET.parse(file_path)
+        root = tree.getroot()
 
-    num_ics_con_sensor = get_number_of_rows(creds, SAMPLE_SPREADSHEET_ID, HOJA_ICS, rango_ics_con_sensor)
-    num_ics_sin_sensor = get_number_of_rows(creds, SAMPLE_SPREADSHEET_ID, HOJA_ICS, rango_ics_sin_sensor)
-    ics_con_sensor = get_ics(XML_SENSOR)[num_ics_con_sensor:]
-    ics_sin_sensor = get_ics(XML_SIN_SENSOR)[num_ics_sin_sensor:]
+        ultimas_partidas = root.find("HistorialPartidas")[:num_rondas]
 
-    if ics_con_sensor:
-        body = {"values": ics_con_sensor}
-        append_to_spreadsheets(creds, SAMPLE_SPREADSHEET_ID, f"{HOJA_ICS}!{rango_ics_con_sensor}", body)
+        ics = [float(p.find("dificultad").text) for p in ultimas_partidas]
+        ics.reverse()
 
-    if ics_sin_sensor:
-        body = {"values": ics_sin_sensor}
-        append_to_spreadsheets(creds, SAMPLE_SPREADSHEET_ID, f"{HOJA_ICS}!{rango_ics_sin_sensor}", body)
+        return ics
+
+    def _get_csv_data(self):
+        with open(self.cvs_path, "r", encoding="utf-8") as csv_file:
+            reader = csv.reader(csv_file, delimiter=",")
+            self.cvs_data = [[x for x in row] for row in reader]
+
+    def _separate_sensor_users(self):
+        self.con_sensor_data = [row for row in self.data_to_update if "-1" not in row[17]]
+        self.sin_sensor_data = [row for row in self.data_to_update if "-1" in row[17]]
+
+    def _get_terapeutas_row(self):
+        self.terapeutas_data = [row for row in self.data_to_update if "-1" not in row[30]]
+
+    def append_to_spreadsheets(self, table_range, body):
+        """
+        Agrega nuevos datos al final de la tabla que esta contenida en el table_range
+        :param table_range: Rango donde se encuentra la tabla al final de la cual se insertaran nuevos datos
+        :param body: Lista de listas con los datos que se van a agregar
+        """
+        try:
+            service = build("sheets", "v4", credentials=self.creds)
+
+            # Call the Sheets API
+            sheet = service.spreadsheets()
+            result = (
+                sheet.values()
+                .append(
+                  spreadsheetId=self.spreadsheet_id,
+                  range=table_range,
+                  valueInputOption="USER_ENTERED",
+                  body=body
+                )
+                .execute()
+            )
+
+            print(f"Rango de celdas actualizadas: {result.get('tableRange')}")
+        except HttpError as err:
+            print(err)
+
+    def batch_update_to_spreadsheets(self, body):
+        """
+        Agrega nuevos datos en la hoja de calculo en el batch indicado
+        :param body: Diccionario con los valores y rangos a subir.
+        Ver https://developers.google.com/sheets/api/reference/rest/v4/spreadsheets.values/batchUpdate?hl=en
+        """
+        try:
+            service = build("sheets", "v4", credentials=self.creds)
+
+            # Call the Sheets API
+            sheet = service.spreadsheets()
+            result = (
+                sheet.values()
+                .batchUpdate(
+                    spreadsheetId=self.spreadsheet_id,
+                    body=body
+                )
+                .execute()
+            )
+
+            print(f"Numero de celdas actualizadas: {result.get('totalUpdatedCells')}")
+        except HttpError as err:
+            print(err)
+
+    def get_number_of_rows(self, hoja=hoja_todos, rango=rango_hojas_encuesta):
+        """Devuelve el numero de pruebas en spreadsheet"""
+        try:
+            service = build("sheets", "v4", credentials=self.creds)
+
+            # Call the Sheets API
+            sheet = service.spreadsheets()
+            result = (
+                sheet.values()
+                .get(
+                    spreadsheetId=self.spreadsheet_id,
+                    range=f"{hoja}!{rango}"
+                )
+                .execute()
+            )
+
+            print(f"Numero de filas en tabla: {len(result.get('values', []))}")
+            return len(result.get("values", []))
+        except HttpError as err:
+            print(err)
+
+    def update_encuesta_data(self):
+        if not self.data_to_update:
+            print("No hay valores por acutalizar")
+            return
+
+        body_todos = {"values": self.data_to_update}
+        body_con_sensor = {"values": self.con_sensor_data}
+        body_sin_sensor = {"values": self.sin_sensor_data}
+        body_terapeutas = {"values": self.terapeutas_data}
+
+        self.append_to_spreadsheets(f"{self.hoja_todos}!{self.rango_hojas_encuesta}", body_todos)
+        self.append_to_spreadsheets(f"{self.hoja_con_sensor}!{self.rango_hojas_encuesta}", body_con_sensor)
+        self.append_to_spreadsheets(f"{self.hoja_sin_sensor}!{self.rango_hojas_encuesta}", body_sin_sensor)
+        self.append_to_spreadsheets(f"{self.hoja_terapeutas}!{self.rango_hojas_encuesta}", body_terapeutas)
+
+    def update_ics(self):
+        if self.ics_con_sensor:
+            body = {"values": self.ics_con_sensor}
+            self.append_to_spreadsheets(f"{self.hoja_ics}!{self.rango_ics_con_sensor}", body)
+
+        if self.ics_sin_sensor:
+            body = {"values": self.ics_sin_sensor}
+            self.append_to_spreadsheets(f"{self.hoja_ics}!{self.rango_ics_sin_sensor}", body)
+
+
+def main():
+    with open("./spreadsheet-data.json", "r") as json_file:
+        json_data = json.loads(json_file.read())
+
+    mision_test_updater = MissionTestUpdater(json_data["spreadsheet_id"],
+                                             json_data["cvs_path"],
+                                             json_data["xml_con_sensor_path"],
+                                             json_data["xml_sin_sensor_path"])
+
+    mision_test_updater.update_encuesta_data()
+    mision_test_updater.update_ics()
 
 
 if __name__ == "__main__":
