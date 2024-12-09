@@ -19,8 +19,16 @@ class MissionTestUpdater:
     hoja_terapeutas = "Terapeutas"
     hoja_ics = "ICS"
     rango_hojas_encuesta = "A1:AK20"
-    rango_ics_con_sensor = "A1:K15"
-    rango_ics_sin_sensor = "L1:Z15"
+
+    rango_ics_con_sensor = "A1:K8"
+    rango_speed_con_sensor = "A9:K16"
+    rango_interval_con_sensor = "A17:K24"
+    rango_range_con_sensor = "A25:K32"
+
+    rango_ics_sin_sensor = "L1:V8"
+    rango_speed_sin_sensor = "L9:V16"
+    rango_interval_sin_sensor = "L17:V24"
+    rango_range_sin_sensor = "L25:V32"
 
     def __init__(self,
                  spreadsheet_id,
@@ -47,8 +55,8 @@ class MissionTestUpdater:
 
         num_ics_con_sensor = self.get_number_of_rows(self.hoja_ics, self.rango_ics_con_sensor)
         num_ics_sin_sensor = self.get_number_of_rows(self.hoja_ics, self.rango_ics_sin_sensor)
-        self.ics_con_sensor = self._get_ics(self.xml_con_sensor_path)[num_ics_con_sensor:]
-        self.ics_sin_sensor = self._get_ics(self.xml_sin_sensor_path)[num_ics_sin_sensor:]
+        self.data_con_sensor = self._get_ics(self.xml_con_sensor_path)
+        self.data_sin_sensor = self._get_ics(self.xml_sin_sensor_path)
 
     def _get_credentials(self):
         self.creds = None
@@ -72,9 +80,16 @@ class MissionTestUpdater:
 
     def _get_ics(self, dir_path):
         ics = []
+        speed = []
+        interval = []
+        rango = []
         for i in range(1, len(os.listdir(dir_path)) + 1):
-            ics.append(self._get_last_ic(os.path.join(dir_path, f"1_Data{i:02d}.xml")))
-        return ics
+            ic, s, i, r = self._get_last_ic(os.path.join(dir_path, f"1_Data{i:02d}.xml"))
+            ics.append(ic)
+            speed.append(s)
+            interval.append(i)
+            rango.append(r)
+        return [ics, speed, interval, rango]
 
     def _get_last_ic(self, file_path, num_rondas=10):
         """Obtiene los ics de las ultimas rondas"""
@@ -85,8 +100,14 @@ class MissionTestUpdater:
 
         ics = [float(p.find("dificultad").text) for p in ultimas_partidas]
         ics.reverse()
+        speeds = [float(p.find("velocidad").text) for p in ultimas_partidas]
+        speeds.reverse()
+        interval = [float(p.find("intervalo").text) for p in ultimas_partidas]
+        interval.reverse()
+        range = [float(p.find("rango").text) for p in ultimas_partidas]
+        range.reverse()
 
-        return ics
+        return ics, speeds, interval, range
 
     def _get_csv_data(self):
         with open(self.cvs_path, "r", encoding="utf-8") as csv_file:
@@ -106,6 +127,7 @@ class MissionTestUpdater:
         :param table_range: Rango donde se encuentra la tabla al final de la cual se insertaran nuevos datos
         :param body: Lista de listas con los datos que se van a agregar
         """
+        print('holis')
         try:
             service = build("sheets", "v4", credentials=self.creds)
 
@@ -187,13 +209,28 @@ class MissionTestUpdater:
         self.append_to_spreadsheets(f"{self.hoja_terapeutas}!{self.rango_hojas_encuesta}", body_terapeutas)
 
     def update_ics(self):
-        if self.ics_con_sensor:
-            body = {"values": self.ics_con_sensor}
-            self.append_to_spreadsheets(f"{self.hoja_ics}!{self.rango_ics_con_sensor}", body)
+        print(self.data_con_sensor)
+        if self.data_con_sensor:
+            body_ics = {"values": self.data_con_sensor[0]}
+            body_speed = {"values": self.data_con_sensor[1]}
+            body_interval = {"values": self.data_con_sensor[2]}
+            body_range = {"values": self.data_con_sensor[3]}
 
-        if self.ics_sin_sensor:
-            body = {"values": self.ics_sin_sensor}
-            self.append_to_spreadsheets(f"{self.hoja_ics}!{self.rango_ics_sin_sensor}", body)
+            self.append_to_spreadsheets(f"{self.hoja_ics}!{self.rango_ics_con_sensor}", body_ics)
+            self.append_to_spreadsheets(f"{self.hoja_ics}!{self.rango_speed_con_sensor}", body_speed)
+            self.append_to_spreadsheets(f"{self.hoja_ics}!{self.rango_interval_con_sensor}", body_interval)
+            self.append_to_spreadsheets(f"{self.hoja_ics}!{self.rango_range_con_sensor}", body_range)
+
+        if self.data_sin_sensor:
+            body_ics = {"values": self.data_sin_sensor[0]}
+            body_speed = {"values": self.data_sin_sensor[1]}
+            body_interval = {"values": self.data_sin_sensor[2]}
+            body_range = {"values": self.data_sin_sensor[3]}
+
+            self.append_to_spreadsheets(f"{self.hoja_ics}!{self.rango_ics_sin_sensor}", body_ics)
+            self.append_to_spreadsheets(f"{self.hoja_ics}!{self.rango_speed_sin_sensor}", body_speed)
+            self.append_to_spreadsheets(f"{self.hoja_ics}!{self.rango_interval_sin_sensor}", body_interval)
+            self.append_to_spreadsheets(f"{self.hoja_ics}!{self.rango_range_sin_sensor}", body_range)
 
 
 def main():
@@ -205,8 +242,9 @@ def main():
                                              json_data["xml_con_sensor_path"],
                                              json_data["xml_sin_sensor_path"])
 
-    mision_test_updater.update_encuesta_data()
+    #mision_test_updater.update_encuesta_data()
     mision_test_updater.update_ics()
+    #mision_test_updater._get_last_ic(os.path.join(mision_test_updater.xml_sin_sensor_path, f"1_Data01.xml"))
 
 
 if __name__ == "__main__":
